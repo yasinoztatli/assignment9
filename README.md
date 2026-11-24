@@ -90,3 +90,23 @@ curl -i -X OPTIONS http://localhost:3000/api/books \
 - `404 Not Found`: Non-existent book IDs and unmatched `/api/*` routes
 - `409 Conflict`: Case-insensitive duplicate `title` + `author` on create or update
 - `500 Internal Server Error`: Unhandled async errors (`/api/crash`) returning `{ "error": "Something went wrong" }`
+
+## Architecture & Key Concepts (Notes)
+
+### 1. CORS & Preflight (`OPTIONS`) Behavior
+- The Express server restricts cross-origin requests to `CLIENT_ORIGIN` (`http://localhost:5173` by default) instead of using a wildcard (`*`).
+- In the browser DevTools **Network** tab:
+  - Simple `GET` requests (`/api/books`, `/api/stats`) without custom headers are sent directly without a preflight request.
+  - Requests that use `Content-Type: application/json` (`POST`, `PUT`, `PATCH`) or non-simple methods (`DELETE`) automatically trigger a browser `OPTIONS` preflight request first. The server responds with `204 No Content` and `Access-Control-Allow-Origin: http://localhost:5173`, allowing the actual request to proceed.
+- On the client (`src/api/books.js`), the `Content-Type: application/json` header is only attached when a request body is present, avoiding unnecessary preflight requests on `GET` calls.
+
+### 2. Express 5 Error Handling & Validation
+- **Automatic Async Error Forwarding:** Express 5 automatically forwards rejected promises from `async` route handlers to the 4-parameter error middleware without manual `try/catch` blocks in every route (verified via `GET /api/crash`).
+- **Malformed JSON Handling:** The error middleware checks `err instanceof SyntaxError && err.status === 400 && 'body' in err` so invalid JSON returns a clean JSON `400 Bad Request` instead of Express's default HTML error page.
+- **JSON 404 Fallback:** Unmatched API paths are caught with `app.use('/api', ...)` to remain compatible with Express 5 path matching and always return JSON `{ "error": "Not found" }`.
+- **PUT vs. PATCH:** `PUT /api/books/:id` validates and replaces the full book record, while `PATCH /api/books/:id` merges provided fields onto the existing book and runs the full validation rules on the merged result (ensuring invariants like "rating requires `read: true`" are never broken).
+
+### 3. Frontend Resilience
+- **Race-Condition Prevention:** `App.jsx` passes an `AbortController` signal to `getBooks` and `getStats` inside `useEffect` cleanup functions so fast filter/search changes cancel stale in-flight requests.
+- **Safe Query Building:** Query parameters are constructed using `URLSearchParams`, skipping empty values automatically.
+- **Immutability:** The in-memory store (`server/booksStore.js`) never mutates arrays or objects in place; every read returns shallow copies and every write creates a new array reference.
