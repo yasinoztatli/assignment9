@@ -102,7 +102,7 @@ app.patch('/api/books/:id', async (req, res) => {
     return res.status(404).json({ error: 'Book not found' });
   }
 
-  const { error, value } = validatePatchData(req.body ? existing : null, req.body);
+  const { error, value } = validatePatchData(existing, req.body);
   if (error) {
     return res.status(400).json({ error });
   }
@@ -135,6 +135,23 @@ app.delete('/api/books/:id', async (req, res) => {
 app.get('/api/stats', async (req, res) => {
   const stats = await getStats();
   return res.status(200).json(stats);
+});
+
+app.get('/api/crash', async (req, res) => {
+  throw new Error('Simulated async server error');
+});
+
+app.use('/api', (req, res) => {
+  return res.status(404).json({ error: 'Not found' });
+});
+
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({ error: 'Malformed JSON in request body' });
+  }
+
+  console.error(err);
+  return res.status(500).json({ error: 'Something went wrong' });
 });
 
 app.listen(PORT, () => {
